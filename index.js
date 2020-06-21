@@ -1,0 +1,546 @@
+const ua = navigator.userAgent;
+const isQT = ua.indexOf('qtwebengine') > -1;
+const isPC = /\b(Windows\sNT|Macintosh|Linux)\b/.test(ua) && !/mobile|android/i.test(ua);
+export const isIOS = !!ua.match(/\(i[^;]+;( U;)? CPU.+Mac OS X/); // ios终端
+export const isAndroid = ua.indexOf('Android') > -1 || ua.indexOf('Adr') > -1;
+export const isMobile = !(isQT || isPC);
+
+let getAddress = () => {
+  const addressVal = location.search.match(/[^?&=]+=[^?&=]+/g);
+  const addressObj = {};
+  if (addressVal) {
+    addressVal.forEach((val) => {
+      addressObj[val.match(/^[^=]+/)[0]] = val.match(/(?!=)[^=]+$/)[0];
+    });
+  }
+  getAddress = () => addressObj;
+  return addressObj;
+};
+/**
+ * 获取地址参数
+ */
+export function getAddressVal() {
+  return getAddress();
+}
+
+/**
+ * 请求接口
+ * @param {Object} obj 
+ * @param {String} obj.url 接口地址
+ * @param {Object} obj.data 请求接口传递的参数
+ * @param {String} obj.type 请求接口的方式，get和post
+ * @param {Function} obj.errorCallback 发生错误时的callback
+ * @return {Promise}
+ */
+export function ajax({ url, data = null, type = 'get', errorCallback = () => {} } = {}) {
+  const xhr = new XMLHttpRequest();
+  type = type.toLocaleLowerCase();
+  if (type === 'get') {
+    url = getUrl(url, data);
+    data = null;
+  }
+  const protocol = location.protocol === 'http:' ? 'http:' : 'https:';
+  if (url.indexOf('http') === -1) {
+    url = protocol + url;
+  }
+  return new Promise((resolve, reject) => {
+    xhr.onreadystatechange = function () {
+      if (parseInt(xhr.readyState) === 4) {
+        if ((xhr.status >= 200 && xhr.status < 300) || parseInt(xhr.status) === 304) {
+          resolve({ status: true, code: xhr.status, data: xhr.responseText, url });
+        } else {
+          reject({ status: false, code: xhr.status, url, statusText: xhr.statusText });
+        }
+      }
+    };
+    xhr.onerror = function (err) {
+      if (typeof err === 'object') {
+        console.error(`请求接口${url}时出错，出错信息为：${JSON.stringify(err.message)}`);
+        const msg = { status: false, code: xhr.status, url, statusText: xhr.statusText, err };
+        errorCallback(msg);
+        reject(msg);
+      }
+    };
+    xhr.open(type, url, true);
+    if (type === 'post') {
+      xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    }
+    xhr.send(data);
+  });
+}
+
+/**
+ * 将指定数据传入地址中
+ * @param {String} url 需要添加的地址
+ * @param {Object} data 需要添加的数据
+ * @return {String}
+ */
+function getUrl(url, data) {
+  if (!data) {
+    return url;
+  }
+  Object.keys(data).forEach((key) => {
+    const f = url.indexOf('?') === -1 ? '?' : '&';
+    let val = data[key];
+    if (val instanceof Object) {
+      val = JSON.stringify(val);
+    }
+    url += `${f}${encodeURIComponent(key)}=${encodeURIComponent(val)}`;
+  });
+  return url;
+}
+
+/**
+ * 将json字符串转为对象
+ * @param {String} str 
+ * @return {Obejct|Boolean} 如果转换失败，则返回false
+ */
+export function parseJson(str) {
+  try {
+    return JSON.parse(str);
+  } catch (err) {
+    return false;
+  }
+}
+
+/**
+ * 获取浏览器类型
+ * @return {Object} obj {isIE:是否为id浏览器,version:ie版本}
+ */
+export function browserType() {
+  const userAgent = navigator.userAgent;
+  const isOpera = userAgent.indexOf('Opera') > -1;
+  const isIE = userAgent.indexOf('compatible') > -1 && userAgent.indexOf('MSIE') > -1 && !isOpera;
+  const reIE = new RegExp('MSIE (\\d+\\.\\d+);');
+  reIE.test(userAgent);
+  const fIEVersion = parseFloat(RegExp.$1);
+  return { isIE, version: fIEVersion };
+}
+
+/**
+ * 新建元素
+ * @param {String} name 新建元素的名称
+ * @param {Object} attr 元素属性
+ * @return {Element}
+ */
+export function createElement(name, attr) {
+  const dom = document.createElement(name);
+  if (attr) {
+    Object.keys(attr).forEach(key => dom.setAttribute(key, attr[key]));
+  }
+  return dom;
+}
+
+/**
+ * 使用字符串创建dom元素
+ * @param {String} html 指定的字符串
+ * @return {Element}
+ */
+export function createElementUseStr(html) {
+  const firstStr = html.match(/^<[^<>]*>/)[0];
+  const arr = firstStr.match(/(\w|-)*=("|')[^"]*("|')/g);
+  const domName = firstStr.match(/\w+/g)[0];
+  const attr = arr.reduce((result, v) => {
+    if (v.indexOf('=') > -1) {
+      const a = v.split('=');
+      const key = a[0];
+      const val = a[1].replace(/"/g, '');
+      result[key] = val;
+    }
+    return result;
+  }, {});
+  const dom = createElement(domName, attr);
+  dom.innerHTML = html.replace(firstStr, '').replace(new RegExp(`</${domName}>$`), '');
+  return dom;
+}
+
+/**
+ * 监听事件
+ * @param {Element|String} element dom元素或者对应的选择器
+ * @param {String} type 事件类型
+ * @param {Function} handler 事件回调
+ * @return {Boolen} 监听结果
+ */
+export function addHandler(element, type, handler) {
+  const el = typeof element === 'string' ? document.querySelector(element) : element;
+  if (!el) {
+    console.error(`调用addHandler时，元素不存在，element:${element},type:${type}`);
+    return false;
+  }
+  if (el.addEventListener) {
+    el.addEventListener(type, handler, false);
+  } else if (el.attachEvent) {
+    el.attachEvent(`on${type}`, handler);
+  } else {
+    el[`on${type}`] = handler;
+  }
+  return true;
+}
+
+/**
+ * 摧毁事件
+ * @param {Element|String} element dom元素或者对应的选择器
+ * @param {String} type 事件类型
+ * @param {Function} fn 事件回调
+ * @return {Boolen} 监听结果
+ */
+export function destroyEvent(element, type, fn) {
+  const el = typeof element === 'string' ? document.querySelector(element) : element;
+  if (el.addEventListener) {
+    el.removeEventListener(type, fn);
+  } else if (el.attachEvent) {
+    el.attachEvent(`on${type}`, () => { });
+  } else {
+    el[`on${type}`] = () => { };
+  }
+}
+
+/**
+ * 防抖
+ */
+export const preventShake = (() => {
+  const commonFun = (fun, time, callback) => {
+    if (!fun || typeof fun !== 'function') {
+      return () => console.log('必须输入函数参数');
+    }
+    if (isNaN(parseInt(time))) {
+      return () => console.log('时间必须为整数');
+    }
+    time = parseInt(time);
+    return callback(fun, time);
+  };
+  return {
+
+    // 最后执行
+    // debounce :: function->number->function
+    debounce: (fun, time) => commonFun(fun, time, (f, t) => {
+      let setTime = null;
+      return (...args) => {
+        if (setTime) {
+          clearTimeout(setTime);
+        }
+        setTime = setTimeout(() => f(...args), t);
+      };
+    }),
+
+    // 一开始就执行
+    // immediate :: function->number->function
+    immediate: (fun, time) => commonFun(fun, time, (f, t) => {
+      let setTime = null; let
+        canStart = true;
+      return (...args) => {
+        if (canStart) {
+          canStart = false;
+          f(...args);
+        } else if (setTime) {
+          clearTimeout(setTime);
+        }
+        setTime = setTimeout(() => {
+          canStart = true;
+        }, t);
+      };
+    })
+  };
+})();
+
+/**
+ * 显示dom
+ * @param {String} id 对应dom的id
+ * @param {String} type 显示设置的display
+ */
+export const show = (id, type = 'block') => {
+  const dom = typeof id === 'string' ? document.getElementById(id) : id;
+  if (!dom) {
+    return;
+  }
+  if (!isShow(dom)) {
+    setStyle(dom, { display: type });
+  }
+};
+
+/**
+ * 隐藏元素
+ * @param {String} id 对应的元素id
+ */
+export const hide = (id) => {
+  const dom = typeof id === 'string' ? document.getElementById(id) : id;
+  if (!dom) {
+    return;
+  }
+  setStyle(dom, { display: 'none' });
+};
+
+/**
+ * 判断对应元素是否显示
+ * @param {String} id 对应的id
+ */
+export const isShow = (id) => {
+  if (!id) {
+    return true;
+  }
+  const dom = typeof id === 'string' ? document.getElementById(id) : id;
+  const style = dom.getAttribute('style') || '';
+  return style ?
+    (!!style.match('display:block')) :
+    (getComputedStyle(dom, null).display === 'block');
+};
+
+/**
+ * 设置指定dom元素样式
+ * @param {Element|String} el 对应的元素
+ * @param {Object} option 设置的属性
+ */
+export function setStyle(el, option) {
+  el = typeof el === 'string' ? document.querySelector(el) : el;
+  if (!el) {
+    return;
+  }
+  let elStyle = (el.getAttribute('style') || '').replace(/\s/g, '');
+  if (elStyle && !(elStyle.match(/;$/))) {
+    elStyle += ';';
+  }
+  Object.keys(option).forEach((key) => {
+    const val = option[key];
+    const reg = new RegExp(`${key}:[^:]*;`);
+    const mat = elStyle.match(reg);
+    const newStyle = `${key}:${val};`;
+    mat
+      ? (elStyle = elStyle.replace(reg, newStyle))
+      : (elStyle += newStyle);
+  });
+  el.setAttribute('style', elStyle);
+}
+
+/**
+ * 移除对应的属性
+ * @param {Element|String} el 对应的元素
+ * @param {Array} option 移除的属性
+ */
+export function removeStyle(el, option) {
+  el = typeof el === 'string' ? document.querySelector(el) : el;
+  if (!el) {
+    return;
+  }
+  let elStyle = (el.getAttribute('style') || '').replace(/\s/g, '');
+  option.forEach((key) => {
+    const reg = new RegExp(`${key}:[^:]*;`);
+    elStyle = elStyle.replace(reg, '');
+  });
+  el.setAttribute('style', elStyle);
+}
+
+/**
+ * 获取对应元素的样式
+ * @param {Element} el 对应的元素
+ * @param {String} key 对应的样式值
+ * @return {String}
+ */
+export function getStyle(el, key) {
+  el = typeof el === 'string' ? document.querySelector(el) : el;
+  if (!el) {
+    return '';
+  }
+  const elStyle = (el.getAttribute('style') || '').replace(/\s/g, '');
+  const reg = `${key}:[^:;]*`;
+  const mat = elStyle.match(reg);
+  if (mat) {
+    return mat[0].replace(`${key}:`, '');
+  }
+  return '';
+}
+
+export function isObject(obj) {
+  return typeof obj === 'object' && obj !== null;
+}
+
+export function addClass(el, c) {
+  el = typeof el === 'string' ? document.querySelector(el) : el;
+  if (!el) {
+    return;
+  }
+  const currentClass = (el.getAttribute('class') || '').trim();
+  const classes = currentClass.split(' ').map(v => v.trim());
+  if (classes.indexOf(c) > -1) {
+    return;
+  }
+  el.setAttribute('class', `${currentClass} ${c}`);
+}
+
+export function removeClass(el, c) {
+  el = typeof el === 'string' ? document.querySelector(el) : el;
+  if (!el) {
+    return;
+  }
+  const currentClass = (el.getAttribute('class') || '').trim();
+  const arr = currentClass.split(' ');
+  const classIndex = arr.indexOf(c);
+  if (classIndex === -1) {
+    return;
+  }
+  arr.splice(classIndex, 1);
+  el.setAttribute('class', (arr.join(' ') || '').trim());
+}
+
+export function hasClass(el, c) {
+  el = typeof el === 'string' ? document.querySelector(el) : el;
+  if (!el) {
+    console.error('调用hasClass时,找不到元素', el, c);
+    return false;
+  }
+  const currentClass = (el.getAttribute('class') || '').trim();
+  const classes = currentClass.split(' ').map(v => v.trim());
+  return classes.indexOf(c) > -1;
+}
+
+// 获取真实长度
+export function getTrueLen(str) {
+  return Array.from(str).reduce((len, s) => {
+    const c = s.charCodeAt(0);
+    return (c >= 0x0001 && c <= 0x007e) || (c >= 0xff60 && c <= 0xff9f)
+      ? (len + 1)
+      : (len + 2);
+  }, 0);
+}
+
+export function prependChild(o, s) {
+  if (s.hasChildNodes()) {
+    s.insertBefore(o, s.firstChild);
+  } else {
+    s.appendChild(o);
+  }
+}
+
+// 延时
+export function delay(time) {
+  return new Promise(resolve => setTimeout(resolve, time));
+}
+
+/**
+ * 图片预加载
+ * @param {Object} param0 {
+ *  imgaes(Array):图片数据
+ *  index(Number):需要加载的图片
+ *  loadNum(Number):预加载多少张
+ * }
+ */
+export function loadImg({ images, index, loadNum = 2 }) {
+  if (!Array.isArray(images)) {
+    throw new Error('images必须为数组');
+  }
+  if (index >= images.length) {
+    return {};
+  }
+  if (typeof images[index] !== 'string') {
+    return {};
+  }
+  if (loadImg.stopPrevRequest) {
+    loadImg.stopPrevRequest();
+  }
+  const createNew = (src) => {
+    const img = new Image();
+    const pro = new Promise((resolve, reject) => {
+      let loadNum = 1;
+      img.onload = resolve;
+      img.onerror = () => {
+        if (loadNum === 3) {
+          reject();
+        } else {
+          loadNum++;
+          setTimeout(() => {
+            img.setAttribute('src', src);
+          }, 1000);
+        }
+      };
+      setStyle(img, { width: '100%' });
+      img.setAttribute('src', src);
+    });
+    return { pro, img };
+  };
+  const max = index + loadNum;
+  const result = createNew(images[index]);
+  const preloading = async function () {
+    for (let i = index + 1; i <= max; i++) {
+      if (preloading.stop) {
+        break;
+      }
+      const url = images[i];
+      if (typeof url !== 'string') {
+        continue;
+      }
+      const newImg = createNew(url);
+      await newImg.pro;
+    }
+  };
+  result.pro.then(preloading);
+
+  loadImg.stopPrevRequest = function () {
+    preloading.stop = true;
+  };
+  return result;
+}
+
+/**
+ * 判断版本号
+ * @param {String} v 
+ * @param {String} m 
+ */
+export function compareVersions(v, m) {
+  if (v === m) {
+    return true;
+  }
+  const reg = /\d*\.\d*\.\d*/;
+  const matV = typeof v === 'string' ? v.match(reg) : null;
+  const matM = typeof m === 'string' ? m.match(reg) : null;
+  if (!(matV && matM)) {
+    return false;
+  }
+  const [v0, v1, v2] = (matV[0].split('.')).map(str => parseInt(str));
+  const [m0, m1, m2] = (matM[0].split('.')).map(str => parseInt(str));
+
+  return v0 > m0 || (
+    v0 === m0 &&
+    (
+      v1 > m1 ||
+      (
+        v1 === m1 &&
+        v2 > m2
+      )
+    )
+  );
+}
+
+/**
+ * 是否支持webp图片压缩
+ */
+export function canUseWebP() {
+  const elem = document.createElement('canvas');
+
+  try {
+    if (elem.getContext && elem.getContext('2d')) {
+      // was able or not to get WebP representation
+      return elem.toDataURL('image/webp').indexOf('data:image/webp') == 0;
+    }
+  } catch (err) {
+    console.error(err);
+    return false;
+  }
+
+  // very old browser like IE 8, canvas not supported
+  return false;
+}
+
+/**
+ * 判断是否为指定元素的子元素
+ * @param {HTMLElement} obj 需要判断的dom元素
+ * @param {HTMLElement} parentObj 需要判断的父元素
+ */
+export function isParentForDom(obj, parentObj) {
+  obj = obj.parentNode;
+  while (obj instanceof HTMLElement && obj.tagName.toUpperCase() != 'BODY') {
+    if (obj === parentObj) {
+      return true;
+    }
+    obj = obj.parentNode;
+  }
+  return false;
+}
